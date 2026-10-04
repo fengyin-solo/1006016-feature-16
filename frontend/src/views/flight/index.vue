@@ -33,7 +33,50 @@
       <button class="btn ghost" type="button" @click="resetFilters">重置条件</button>
     </form>
 
-    <table class="data-table">
+    <!-- 配餐交接待办：直接读配餐领域服务，份数与航空配餐页同一份口径，不在这里重算 -->
+    <section class="todo-board">
+      <header class="todo-head">
+        <h3>配餐交接待办</h3>
+        <span class="page-desc">
+          待签认 {{ pendingTodos.length }} 单 · 已交接 {{ handedTodos.length }} 单；份数以配餐作业核对口径为准
+        </span>
+      </header>
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>作业编号</th>
+            <th>航班号</th>
+            <th>配餐公司</th>
+            <th>装载舱门</th>
+            <th>配餐份数</th>
+            <th>交接状态</th>
+            <th>签认人</th>
+            <th>交接时间</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="item in cateringTodos" :key="item.id">
+            <td>{{ item.作业编号 }}</td>
+            <td>{{ item.航班号 }}</td>
+            <td>{{ item.配餐公司 }}</td>
+            <td>{{ item.装载舱门 || '—' }}</td>
+            <td><strong>{{ item.份数 }}</strong></td>
+            <td>
+              <span class="check-badge" :class="item.状态 === '待签认' ? 'badge-warn' : 'badge-ok'">
+                {{ item.状态 }}
+              </span>
+            </td>
+            <td>{{ item.签认人 || '—' }}</td>
+            <td>{{ item.交接时间 || '—' }}</td>
+          </tr>
+          <tr v-if="!cateringTodos.length">
+            <td colspan="8" class="empty-state">暂无配餐交接待办</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <table class="data-table" style="margin-top: 12px">
       <thead>
         <tr>
           <th v-for="column in columns" :key="column">{{ column }}</th>
@@ -71,7 +114,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 
 import {
   downloadEntries,
@@ -79,7 +122,9 @@ import {
   moduleMeta,
   runAction as applyAction,
 } from '@/api/local-service'
-import type { EntryRow } from '@/data/types'
+import { listHandoverTodos } from '@/api/catering-service'
+import { onStoreChange } from '@/data/local-store'
+import type { CateringHandoverTodo, EntryRow } from '@/data/types'
 
 const meta = moduleMeta('flight')
 const columns = ["保障编号", "航班号", "机型", "计划到达", "机位号", "保障等级", "保障班组", "保障状态"]
@@ -92,6 +137,9 @@ const total = ref(0)
 const errorMessage = ref('')
 const filters = ref<Record<string, string>>({})
 const filterFields = columns.slice(0, 3)
+const cateringTodos = ref<CateringHandoverTodo[]>([])
+const pendingTodos = computed(() => cateringTodos.value.filter((item) => item.状态 === '待签认'))
+const handedTodos = computed(() => cateringTodos.value.filter((item) => item.状态 === '已交接'))
 const statusSummary = computed(() =>
   statuses.map((status: string) => ({
     status,
@@ -133,5 +181,20 @@ function reload() {
   }
 }
 
-onMounted(reload)
+// 配餐待办只读领域服务，份数不在保障模块二次计算。
+function reloadCateringTodos() {
+  cateringTodos.value = listHandoverTodos()
+}
+
+const unsubscribe = onStoreChange((key) => {
+  if (key === 'catering' || key === '*') {
+    reloadCateringTodos()
+  }
+})
+
+onMounted(() => {
+  reload()
+  reloadCateringTodos()
+})
+onUnmounted(unsubscribe)
 </script>

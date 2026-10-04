@@ -30,6 +30,11 @@ export function listEntries(key: string, filters: Record<string, string> = {}): 
 
 export function runAction(key: string, id: number, action: string): ActionResult {
   const meta = moduleMeta(key)
+  // 配餐作业走专用领域服务：数量核对与顺序状态机都在那里，
+  // 通用入口不允许直接改配餐状态，避免跳过核对或越级推进。
+  if (key === 'catering') {
+    return { ok: false, message: '配餐作业请使用航空配餐页面的核对与交接操作' }
+  }
   const target = meta.actionTargets[action]
   if (!target) {
     return { ok: false, message: `${meta.entity}没有登记「${action}」这个动作` }
