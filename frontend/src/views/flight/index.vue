@@ -18,6 +18,57 @@
       </article>
     </div>
 
+    <section class="todo-panel">
+      <h3 class="todo-title">配餐交接待办（份数与航空配餐作业同源，不另行统计）</h3>
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>配餐作业</th>
+            <th>航班号</th>
+            <th>配餐公司</th>
+            <th>配餐份数</th>
+            <th>装车核对</th>
+            <th>交接签认人</th>
+            <th>交接时间</th>
+            <th>办结状态</th>
+            <th>操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="todo in cateringTodos" :key="todo.id">
+            <td>{{ todo.作业编号 }}</td>
+            <td>{{ todo.航班号 }}</td>
+            <td>{{ todo.配餐公司 }}</td>
+            <td>{{ todo.配餐份数 }}</td>
+            <td>
+              <span :class="conclusionClass(todo.核对结论)">{{ todo.核对结论 }}</span>
+            </td>
+            <td>{{ todo.交接人员 || '—' }}</td>
+            <td>{{ todo.交接时间 || '—' }}</td>
+            <td>{{ todo.办结 ? '已办结' : '待办结' }}</td>
+            <td>
+              <button
+                v-if="!todo.办结"
+                class="link"
+                type="button"
+                @click="finishTodo(todo.id)"
+              >
+                办结
+              </button>
+              <span v-else class="muted-text">—</span>
+            </td>
+          </tr>
+          <tr v-if="!cateringTodos.length">
+            <td colspan="9" class="empty-state">暂无已交接的配餐作业，待办由配餐签认后自动进入</td>
+          </tr>
+        </tbody>
+      </table>
+      <footer class="todo-foot">
+        <span>共 {{ cateringTodos.length }} 条 · 未办结 {{ pendingTodoCount }} 条</span>
+        <span v-if="todoMessage" :class="todoError ? 'error-text' : 'ok-text'">{{ todoMessage }}</span>
+      </footer>
+    </section>
+
     <p class="status-legend">
       <span v-for="item in statusSummary" :key="item.status" class="legend-item">
         {{ item.status }}：{{ item.count }}
@@ -71,15 +122,18 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 
 import {
+  completeCateringHandoverTodo,
   downloadEntries,
+  listCateringHandoverTodos,
   listEntries,
   moduleMeta,
   runAction as applyAction,
 } from '@/api/local-service'
-import type { EntryRow } from '@/data/types'
+import { subscribeStore } from '@/data/local-store'
+import type { CateringHandoverTodo, CateringCheckStatus, EntryRow } from '@/data/types'
 
 const meta = moduleMeta('flight')
 const columns = ["保障编号", "航班号", "机型", "计划到达", "机位号", "保障等级", "保障班组", "保障状态"]
@@ -92,12 +146,26 @@ const total = ref(0)
 const errorMessage = ref('')
 const filters = ref<Record<string, string>>({})
 const filterFields = columns.slice(0, 3)
+const cateringTodos = ref<CateringHandoverTodo[]>([])
+const todoMessage = ref('')
+const todoError = ref(false)
 const statusSummary = computed(() =>
   statuses.map((status: string) => ({
     status,
     count: rows.value.filter((row) => String(row.status) === status).length,
   })),
 )
+const pendingTodoCount = computed(() => cateringTodos.value.filter((todo) => !todo.办结).length)
+
+function conclusionClass(conclusion: CateringCheckStatus): string {
+  if (conclusion === '相符') {
+    return 'ok-text'
+  }
+  if (conclusion === '少装') {
+    return 'error-text'
+  }
+  return 'muted-text'
+}
 
 function resetFilters() {
   filters.value = {}
@@ -112,6 +180,12 @@ function openCreate() {
   errorMessage.value = '航班保障任务登记入口尚未接入审批流'
 }
 
+function finishTodo(id: number) {
+  const result = completeCateringHandoverTodo(id)
+  todoMessage.value = result.message
+  todoError.value = !result.ok
+}
+
 function runAction(action: string, row: EntryRow) {
   errorMessage.value = ''
   const result = applyAction(meta.key, Number(row.id), action)
@@ -122,16 +196,25 @@ function runAction(action: string, row: EntryRow) {
   reload()
 }
 
+function reloadTodos() {
+  cateringTodos.value = listCateringHandoverTodos()
+}
+
 function reload() {
   errorMessage.value = ''
   try {
     const payload = listEntries(meta.key, filters.value)
     rows.value = payload.items
     total.value = payload.total
+    reloadTodos()
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : '航班保障列表读取失败'
   }
 }
 
+// 配餐页签签认后，本页签的待办清单通过同一份存储实时同步，份数始终与配餐作业一致。
+const unsubscribe = subscribeStore(reloadTodos)
+
 onMounted(reload)
+onUnmounted(unsubscribe)
 </script>
